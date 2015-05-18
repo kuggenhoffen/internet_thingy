@@ -198,6 +198,28 @@ class UDPClientTestCase(unittest.TestCase):
         except socket.error as serr:
             self.fail('Nack receive timedout')
         sock.close()
+        
+    def test_client_send(self):
+        localhost = '127.0.0.1'
+        clientport = 10000
+        testerport = 10100
+        
+        # Create socket for sending and receiving
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.bind((localhost, testerport))
+        
+        # Init client
+        self.udpclient.set_connection_params(localhost, testerport)
+        self.udpclient.set_listen_port(clientport)
+        self.udpclient.init_socket()
+        
+        # Send test message
+        self.udpclient.send("TESTMESSAGE", False, True)
+        
+        # Read test message with socket
+        d = sock.recv(128)
+        
+        self.assertEqual(d, self.udpclient.packetise(False, True, "TESTMESSAGE")[0])
 
 class UDPReceiverTestCase(unittest.TestCase):
     def setUp(self):

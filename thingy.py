@@ -16,6 +16,7 @@ import struct
 import errno
 from Queue import Queue, Empty
 from threading import Thread
+from questions import answer
 
 class UDPReceiver(Thread):
     sock = None
@@ -58,13 +59,14 @@ class UDPClient():
     stop_flag = False
     rq = None
     msg_list = []
+    receiver = None
     
     def __init__(self):
         self.logger = logging.getLogger('UDPClient')
         self.logger.info('Initialized')
         self.rq = Queue(0)
         
-    """ Setup the UDP socket and start accepting incoming connections. Returns True on successfull 
+    """ Setup the UDP socket and start accepting incoming connections. Returns True on successful
         socket creation and binding. False otherwise
     """
     def init_socket(self):
@@ -87,21 +89,31 @@ class UDPClient():
     def close(self):
         try:
             # Stop receiving thread and wait until it stops
-            self.receiver.stop()
-            self.receiver.join()
-            self.sock.close()
-            self.sock = None
-        except:
-            self.logger.error('Exception on socket closing')
+            if self.receiver:
+                self.receiver.stop()
+                self.receiver.join()
+            if self.sock:
+                self.sock.close()
+                self.sock = None
+        except Exception as ex:
+            self.logger.error('Exception on socket closing %s' % ex)
 
     def set_listen_port(self, port = 10000):
         self.listen_port = port
 
     def send_raw(self, address, port, data):
-        if self.sock:
+        if self.sock and address and port and data:
+            self.logger.info('Sending to %s:%s(%s:%s), len=%d' % (address, port, type(address), type(port), len(data)))
             self.sock.sendto(data, (address, port))
             return True
         return False
+    
+    def send(self, data, eom=False, ack=True):
+        # Generate packets from data
+        packets = self.packetise(eom, ack, data)
+        if packets:
+            for packet in packets:
+                self.send_raw(self.server_address, self.server_port, packet)
     
     """ Returns a tuple containing packet data, source address and port: (data, (address, port))
         Or None in case there is a problem with socket or queue
@@ -188,6 +200,10 @@ class UDPClient():
             self.logger.error('Invalid data length!')
         
         return (eom, ack, len, rem, content.rstrip(chr(0)))
+    
+    def set_connection_params(self, addr, port):
+        self.server_address = addr
+        self.server_port = int(port)
 
 class TCPClient:
     
@@ -301,20 +317,17 @@ class Thingy:
         # Initialize UDP server parameters and start listening
         self.logger.info('Starting UDP server...')
         self.udp_client.set_connection_params(server_params['address'], server_params['udp_port'])
+        self.udp_client.set_listen_port(10000)
         self.udp_client.init_socket()
-        self.udp_client.start()
-        
+        self.udp_client.send('HELO')
+        while True:
+            msg = self.udp_client.get_next_message()
+            a = answer(msg)
+            self.udp_client.send(a)
+            if self.udp_client.eom_received:
+                break
         return 0;
     
 if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
-    eka = UDPClient(10000)
-    eka.init_socket()
-    toka = UDPClient(10000)
-    toka.init_socket()
-    eka.start()
-    toka.start()
-    
-    eka.send("localhost", 10010, "Moro toka!")
-    toka.send("localhost", 10000, "No moro eka!")
-    #sys.exit(Thingy().run())
+    sys.exit(Thingy().run())
