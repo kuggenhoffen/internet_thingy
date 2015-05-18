@@ -60,6 +60,8 @@ class UDPClient():
     rq = None
     msg_list = []
     receiver = None
+    eom_received = False
+    server_info = None
     
     def __init__(self):
         self.logger = logging.getLogger('UDPClient')
@@ -75,7 +77,7 @@ class UDPClient():
                 # Initialize socket
                 self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                 # Bind to local port
-                self.sock.bind(('localhost', self.listen_port))
+                self.sock.bind(('', self.listen_port))
                 # Create receiving thread and start it
                 self.receiver = UDPReceiver(self.sock, self.rq)
                 self.receiver.start()
@@ -83,7 +85,7 @@ class UDPClient():
             except socket.error as exc:
                 self.logger.error("Socket error: %s" % exc)
         else:
-            self.logger.error("Connection parameters not set!")
+            self.logger.debug("Connection parameters not set!")
         return False
     
     def close(self):
@@ -101,19 +103,22 @@ class UDPClient():
     def set_listen_port(self, port = 10000):
         self.listen_port = port
 
-    def send_raw(self, address, port, data):
-        if self.sock and address and port and data:
-            self.logger.info('Sending to %s:%s(%s:%s), len=%d' % (address, port, type(address), type(port), len(data)))
-            self.sock.sendto(data, (address, port))
+    def send_raw(self, address, data):
+        if self.sock and address and data:
+            self.sock.sendto(data, address)
             return True
         return False
     
     def send(self, data, eom=False, ack=True):
         # Generate packets from data
+        self.logger.debug('Sending \'%s\'' % data)
         packets = self.packetise(eom, ack, data)
         if packets:
             for packet in packets:
-                self.send_raw(self.server_address, self.server_port, packet)
+                self.send_raw(self.server_info, packet)
+    
+    def send_nack(self):
+        self.send('Send again.', False, False)
     
     """ Returns a tuple containing packet data, source address and port: (data, (address, port))
         Or None in case there is a problem with socket or queue
@@ -132,14 +137,18 @@ class UDPClient():
                 data, addr = self.rq.get()
                 eom, ack, chunk_len, last_remaining, msg_chunk = self.unpack(data)
                 msg_chunk = msg_chunk.rstrip(chr(0))
+                # Check source address and port, if they don't match the configured ones, NACK the message
+                # and request resend
+                if not addr == self.server_info:
+                    self.logger.debug('Different source address in received packet: %s != %s' % (addr, self.server_info))
+                    self.send_nack() 
                 # Compare header length to stripped chunk length, if chunk length is 
                 # greater than length in header field, then we have invalid packet and
                 # need to nack to request new transmission
                 clen = len(msg_chunk)
                 if chunk_len < clen:
-                    self.logger.info('Invalid chunk length expected %d got %d' % (chunk_len, clen))
-                    p = self.packetise(False, False, 'Send again.')
-                    self.send_raw(addr[0], addr[1], p[0])
+                    self.logger.debug('Invalid chunk length expected %d got %d' % (chunk_len, clen))
+                    self.send_nack()
                     return None
                  
                 msg = msg + msg_chunk
@@ -153,7 +162,7 @@ class UDPClient():
                     # No packets in queue? return None
                     return None
                 pass
-        self.logger.info('Received %d chunks' % chunks)
+        self.logger.debug('Received %d chunks' % chunks)
         return msg, addr
         
     
@@ -177,6 +186,8 @@ class UDPClient():
             # Packetise d left justified with null characters if necessary to get 64 bytes.
             packets.append(struct.pack(self.PROTOCOL_FORMAT, eom, ack, len(d), len(remaining), d.ljust(64, chr(0))))
             
+            self.logger.debug('Packed eom=%r, ack=%r, len=%d, remaining=%d' % (eom, ack, len(d), len(remaining)))
+            
             # Get new packet data from remaining bytes, if any left
             d = remaining[:64]
         
@@ -195,15 +206,20 @@ class UDPClient():
         
         packet = None
         try:
-            eom, ack, len, rem, content = struct.unpack(self.PROTOCOL_FORMAT, data)
+            eom, ack, length, rem, content = struct.unpack(self.PROTOCOL_FORMAT, data)
+            self.logger.debug('Unpacked eom=%r, ack=%r, len=%d, remaining=%d' % (eom, ack, length, rem))
         except:
             self.logger.error('Invalid data length!')
         
-        return (eom, ack, len, rem, content.rstrip(chr(0)))
+        return (eom, ack, length, rem, content.rstrip(chr(0)))
     
-    def set_connection_params(self, addr, port):
-        self.server_address = addr
-        self.server_port = int(port)
+    def set_server_info(self, addr, port):
+        if isinstance(port, str):
+            try:
+                port = int(port)
+            except:
+                self.logger.error('Invalid port format')
+        self.server_info = (addr, port)
 
 class TCPClient:
     
@@ -278,6 +294,7 @@ class Thingy:
     
     config = None
     logger = None
+    server_info = None
     
     def __init__(self, argv=None):        
         # Get command line arguments from system if none passed
@@ -297,37 +314,62 @@ class Thingy:
             logging.basicConfig(level=logging.ERROR)
         self.logger = logging.getLogger('Thingy')
 
-        # Instantiate UDP and TCP clients
-        self.logger.info('Initializing clients...')
-        self.udp_client = UDPClient()
-        self.tcp_client = TCPClient(self.config.server_address, self.config.server_port)        
-                
-        print 'Let''s do this with %s:%s' % (self.config.server_address, self.config.server_port)
+        # Resolve address if it's in domain form
+        addrinfo = socket.getaddrinfo(self.config.server_address, self.config.server_port, socket.AF_INET, socket.SOCK_DGRAM)
+        for ai in addrinfo:
+            # Select one with UDP as protocol
+            if ai[2] == 17:
+                self.server_info = ai[4]
+
+        if self.server_info:
+            # Instantiate UDP and TCP clients
+            self.logger.info('Initializing clients...')
+            self.udp_client = UDPClient()
+            self.tcp_client = TCPClient(*self.server_info)
+                    
+            self.logger.info('Server info %s' % (self.server_info,))
     
     def run(self):
-        self.logger.info('Running...')
-        
-        if not self.tcp_client.connection_request(10000):
-            self.logger.info('Unable to connect to server')
+        # Continue only if we have valid server information
+        if self.server_info:
+            self.logger.info('Running...')
+            
+            if not self.tcp_client.connection_request(10000, 'MI'):
+                self.logger.info('Unable to connect to server')
+                return 0
+            
+            # Get connection parameters from TCP client
+            server_params = self.tcp_client.get_server_params()
+    #        server_params = {}
+    #        server_params['address'] = self.config.server_address
+    #        server_params['udp_port'] = self.config.server_port
+            
+            # Initialize UDP server parameters and start listening
+            self.logger.info('Starting UDP server...')
+            self.udp_client.set_server_info(server_params['address'], server_params['udp_port'])
+            self.udp_client.set_listen_port(10000)
+            self.udp_client.init_socket()
+            self.udp_client.send('HELO')
+            while True:
+                msg, source = self.udp_client.get_next_message()
+                self.logger.info("Received '%s'" % msg)
+                if msg:
+                    if self.udp_client.eom_received:
+                        self.logger.debug('EOM received')
+                        break
+                    a = answer(msg)
+                    if a:
+                        self.logger.info("Sending '%s'" % a)
+                        self.udp_client.send(a)
+                    else:
+                        self.logger.info('No answer')
+                        self.udp_client.send_nack()
+                else:
+                    self.logger.info('Empty message')
+                    self.udp_client.send_nack()
+            self.udp_client.close()
             return 0
-        
-        # Get connection parameters from TCP client
-        server_params = self.tcp_client.get_server_params()
-        
-        # Initialize UDP server parameters and start listening
-        self.logger.info('Starting UDP server...')
-        self.udp_client.set_connection_params(server_params['address'], server_params['udp_port'])
-        self.udp_client.set_listen_port(10000)
-        self.udp_client.init_socket()
-        self.udp_client.send('HELO')
-        while True:
-            msg = self.udp_client.get_next_message()
-            a = answer(msg)
-            self.udp_client.send(a)
-            if self.udp_client.eom_received:
-                break
-        return 0;
     
 if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
-    sys.exit(Thingy().run())
+    Thingy().run()

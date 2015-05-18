@@ -52,7 +52,7 @@ class UDPClientTestCase(unittest.TestCase):
         # Init client socket and send message
         self.udpclient.set_listen_port(listenport)
         self.udpclient.init_socket()
-        self.udpclient.send_raw(localhost, 10001, msg)
+        self.udpclient.send_raw((localhost, 10001), msg)
         
         (data, addr) = sock.recvfrom(64)
         self.assertEqual(addr, (localhost, listenport))
@@ -71,7 +71,7 @@ class UDPClientTestCase(unittest.TestCase):
         # Init client socket and send message
         self.udpclient.set_listen_port(listenport)
         self.udpclient.init_socket()
-        self.assertTrue(self.udpclient.send_raw(localhost, 10001, msg))
+        self.assertTrue(self.udpclient.send_raw((localhost, 10001), msg))
         
         (data, addr) = sock.recvfrom(64)
         self.assertEqual(addr, (localhost, listenport))
@@ -125,17 +125,20 @@ class UDPClientTestCase(unittest.TestCase):
         self.assertEqual(uc, data[64:])
     
     def test_socket_send_before_init(self):
-        self.assertFalse(self.udpclient.send_raw('127.0.0.1', 10001, 'TEST'))
+        self.assertFalse(self.udpclient.send_raw(('127.0.0.1', 10001), 'TEST'))
     
     def test_client_receive_queue_short(self):
         localhost = '127.0.0.1'
         listenport = 10000
+        testerport = 10100
         
         # Create socket for sending to client
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)        
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)   
+        sock.bind((localhost, testerport))     
         
         # Init client socket and start listening thread
         self.udpclient.set_listen_port(listenport)
+        self.udpclient.set_server_info(localhost, testerport)
         self.udpclient.init_socket()
         
         # Generate message in correct format for sending to client
@@ -150,12 +153,15 @@ class UDPClientTestCase(unittest.TestCase):
     def test_client_receive_queue_multi(self):
         localhost = '127.0.0.1'
         listenport = 10000
+        testerport = 10100
         
         # Create socket for sending to client
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)        
+        sock.bind((localhost, testerport))
         
         # Init client socket and start listening thread
         self.udpclient.set_listen_port(listenport)
+        self.udpclient.set_server_info(localhost, testerport)
         self.udpclient.init_socket()
         
         # Generate message in correct format for sending to client
@@ -177,6 +183,7 @@ class UDPClientTestCase(unittest.TestCase):
         
         # Init client socket and start listening thread
         self.udpclient.set_listen_port(clientport)
+        self.udpclient.set_server_info(localhost, testerport)
         self.udpclient.init_socket()
         
         # Generate message in correct format for sending to client
@@ -209,7 +216,7 @@ class UDPClientTestCase(unittest.TestCase):
         sock.bind((localhost, testerport))
         
         # Init client
-        self.udpclient.set_connection_params(localhost, testerport)
+        self.udpclient.set_server_info(localhost, testerport)
         self.udpclient.set_listen_port(clientport)
         self.udpclient.init_socket()
         
@@ -218,7 +225,7 @@ class UDPClientTestCase(unittest.TestCase):
         
         # Read test message with socket
         d = sock.recv(128)
-        
+    
         self.assertEqual(d, self.udpclient.packetise(False, True, "TESTMESSAGE")[0])
 
 class UDPReceiverTestCase(unittest.TestCase):
@@ -261,7 +268,7 @@ class UDPReceiverTestCase(unittest.TestCase):
         self.assertTupleEqual(self.queue.get(), (testmsg, self.addr))
 
 if __name__ == '__main__':
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.DEBUG)
     suites = []
     suites.append(unittest.TestLoader().loadTestsFromTestCase(UDPReceiverTestCase))
     suites.append(unittest.TestLoader().loadTestsFromTestCase(UDPClientTestCase))
