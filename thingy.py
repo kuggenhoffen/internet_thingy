@@ -292,7 +292,7 @@ class Thingy:
         if argv is None:
             argv = sys.argv[1:]
         
-        parser = argparse.ArgumentParser()
+        parser = argparse.ArgumentParser(description="Introduction to Internet coursework. Connects to server, and answers questions provided by the server.")
         parser.add_argument('--server', '-s', action='store', required=True, dest='server_address', type=str)
         parser.add_argument('--port', '-p', action='store', required=True, dest='server_port', type=int)
         parser.add_argument('--verbose', '-v', action='store_true', required=False, dest='verbose')
