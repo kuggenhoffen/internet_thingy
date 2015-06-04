@@ -55,7 +55,7 @@ class UDPClient():
     server_info = None
     
     def __init__(self):
-        self.logger = logging.getLogger('UDPClient')
+        self.logger = logging.getLogger('Thingy.UDPClient')
         self.logger.info('Initialized')
         self.rq = Queue(0)
         
@@ -225,7 +225,7 @@ class TCPClient:
     def __init__(self, server_address, server_port):
         self.server['address'] = server_address
         self.server['tcp_port'] = server_port
-        self.logger = logging.getLogger('TCPClient')
+        self.logger = logging.getLogger('Thingy.TCPClient')
         self.logger.info('Initialized')
     
     """ Used to communicate the listening UDP port and capabilities of the client
@@ -295,15 +295,17 @@ class Thingy:
         parser = argparse.ArgumentParser(description="Introduction to Internet coursework. Connects to server, and answers questions provided by the server.")
         parser.add_argument('--server', '-s', action='store', required=True, dest='server_address', type=str)
         parser.add_argument('--port', '-p', action='store', required=True, dest='server_port', type=int)
-        parser.add_argument('--verbose', '-v', action='store_true', required=False, dest='verbose')
+        parser.add_argument('--verbose', '-v', action='store_true', required=False, dest='verbose', default=False)
         self.config = parser.parse_args(argv)
         
         # Initialize logging
-        if self.config.verbose:
-            logging.basicConfig(level=logging.DEBUG)
-        else:
-            logging.basicConfig(level=logging.ERROR)
         self.logger = logging.getLogger('Thingy')
+        if self.config.verbose:
+            self.logger.setLevel(logging.DEBUG)
+            print "Verbose"
+        else:
+            self.logger.setLevel(logging.INFO)
+            print "Not verbose"
 
         # Resolve address if it's in domain form
         addrinfo = socket.getaddrinfo(self.config.server_address, self.config.server_port, socket.AF_INET, socket.SOCK_DGRAM)
@@ -353,10 +355,10 @@ class Thingy:
                         self.logger.info("Sending '%s'" % a)
                         self.udp_client.send(a)
                     else:
-                        self.logger.info('No answer')
+                        self.logger.info('No answer, sending NACK')
                         self.udp_client.send_nack()
                 else:
-                    self.logger.info('Empty message')
+                    self.logger.info('Empty message, sending NACK')
                     self.udp_client.send_nack()
             self.udp_client.close()
             return 0
