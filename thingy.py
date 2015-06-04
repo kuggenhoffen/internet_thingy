@@ -1,12 +1,3 @@
-#TODO: Program can take additional arguments such as list of extra features to enable
-#TODO: Program uses TCP to connect to server, exchanges port numbers, possible extra features and possible encryption keys with server
-#TODO: Program uses UDP to send a "Hello" message to a server
-#TODO: Server sends a question
-#TODO: Program uses a module provided by assistants to find out the correct answer
-#TODO: Program replies with correct answer
-#TODO: Server sends a new message predefined number of times
-#TODO: After all questions are answered, close the program
-
 import sys
 import argparse
 import socket
